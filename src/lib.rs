@@ -124,6 +124,5 @@ pub fn derive_metadata(item: proc_macro::TokenStream) -> proc_macro::TokenStream
         }
     };
 
-    println!("{}", tokens);
     proc_macro::TokenStream::from(tokens)
 }
