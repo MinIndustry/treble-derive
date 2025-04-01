@@ -12,3 +12,4 @@ convert_case = "0.8.0"
 proc-macro2 = "1.0.94"
 quote = "1.0.39"
 syn = "2.0.99"
+rustic-meta = { path = "../rustic-meta" }

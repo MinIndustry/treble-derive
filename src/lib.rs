@@ -2,11 +2,10 @@ use convert_case::{Case, Casing};
 use quote::quote;
 use syn::{parse_macro_input, DeriveInput};
 
-mod metadata;
 mod parameters;
 
-use metadata::FilterMetaData;
-use parameters::{extract_parameter, Parameter};
+use parameters::extract_parameter;
+use rustic_meta::Parameter;
 
 /// Extracts the description from the filter's
 /// docstring. If multiple docstrings are found,
@@ -95,15 +94,36 @@ fn filter_parameters(input: &DeriveInput) -> Vec<Parameter> {
 /// This metadata is used to generate the required
 /// data for the frontend to render the filter.
 pub fn derive_metadata(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    let mut metadata = FilterMetaData::default();
-
     let input = parse_macro_input!(item as DeriveInput);
 
-    metadata.name = input.ident.clone().to_string();
-    metadata.description = filter_description(&input);
-    metadata.source_amount = filter_input_ports(&input);
-    metadata.parameters = filter_parameters(&input);
+    let name = input.ident.clone().to_string();
+    let description = filter_description(&input);
+    let source_amount = filter_input_ports(&input);
+    let parameters: Vec<Parameter> = filter_parameters(&input);
 
-    // TODO: Implement the actual metadata generation
-    proc_macro::TokenStream::from(quote! {})
+    let struct_name = input.ident.clone();
+    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
+
+    let tokens = quote! {
+        impl #impl_generics crate::meta::FilterMetadata for #struct_name #ty_generics #where_clause {
+            fn name(&self) -> String {
+                String::from(#name)
+            }
+
+            fn description(&self) -> String {
+                String::from(#description)
+            }
+
+            fn source_amount(&self) -> usize {
+                #source_amount
+            }
+
+            fn parameters(&self) -> Vec<rustic_meta::Parameter> {
+                vec![#(#parameters),*]
+            }
+        }
+    };
+
+    println!("{}", tokens);
+    proc_macro::TokenStream::from(tokens)
 }

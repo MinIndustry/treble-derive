@@ -1,19 +1,5 @@
 use proc_macro2::{TokenStream, TokenTree};
-
-// #[derive(Debug, Clone)]
-// pub enum Literal {
-//     Toggle(String, bool),
-//     Range(String, f32, f32, f32),
-//     Float(String, f32),
-// }
-
-#[derive(Clone, Debug)]
-pub enum Parameter {
-    Toggle(String, bool),
-    Range(String, f32, f32, f32),
-    Float(String, f32),
-    // List(String, usize, Literal),
-}
+use rustic_meta::Parameter;
 
 /// Extracts the range parameter from the token stream.
 fn extract_range_parameter(name: String, stream: TokenStream) -> Parameter {
