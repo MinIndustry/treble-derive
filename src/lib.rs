@@ -1,5 +1,4 @@
-use convert_case::{Case, Casing};
-use quote::quote;
+use quote::{format_ident, quote};
 use syn::{parse_macro_input, DeriveInput};
 
 mod parameters;
@@ -62,7 +61,7 @@ fn filter_input_ports(input: &DeriveInput) -> usize {
 }
 
 /// Extracts the parameters from the filter structure.
-fn filter_parameters(input: &DeriveInput) -> Vec<Parameter> {
+fn filter_parameters(input: &DeriveInput) -> Vec<Parameter<String>> {
     let mut parameters = vec![];
     if let syn::Data::Struct(filter_structure) = &input.data {
         for field in filter_structure.fields.iter() {
@@ -72,13 +71,12 @@ fn filter_parameters(input: &DeriveInput) -> Vec<Parameter> {
                 .position(|e| e.path().is_ident("filter_parameter"))
             {
                 if let syn::Meta::List(token_list) = &field.attrs[position].meta {
-                    let name: String = field
+                    let field_name = field
                         .ident
                         .clone()
-                        .unwrap_or(syn::Ident::new("unknown", proc_macro2::Span::call_site()))
-                        .to_string()
-                        .to_case(Case::Title);
-                    parameters.push(extract_parameter(name, token_list.tokens.clone()));
+                        .expect("Field name is required")
+                        .to_string();
+                    parameters.push(extract_parameter(field_name, token_list.tokens.clone()));
                 } else {
                     println!("{:?}", field.attrs[position].meta);
                 }
@@ -89,37 +87,40 @@ fn filter_parameters(input: &DeriveInput) -> Vec<Parameter> {
     parameters
 }
 
-#[proc_macro_derive(FilterMetaData, attributes(filter_source, filter_parameter))]
 /// Derives the metadata from a filter structure.
 /// This metadata is used to generate the required
 /// data for the frontend to render the filter.
+#[proc_macro_derive(FilterMetaData, attributes(filter_source, filter_parameter))]
 pub fn derive_metadata(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = parse_macro_input!(item as DeriveInput);
 
     let name = input.ident.clone().to_string();
+    let const_meta_name = format_ident!("{}_META", name);
     let description = filter_description(&input);
     let source_amount = filter_input_ports(&input);
-    let parameters: Vec<Parameter> = filter_parameters(&input);
+    let parameters: Vec<Parameter<String>> = filter_parameters(&input);
 
-    let struct_name = input.ident.clone();
+    let struct_name = &input.ident;
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
     let tokens = quote! {
-        impl #impl_generics crate::meta::FilterMetadata for #struct_name #ty_generics #where_clause {
-            fn name(&self) -> String {
-                String::from(#name)
-            }
+        use crate::meta::structs::MetaFilter;
+        use rustic_meta::Parameter;
 
-            fn description(&self) -> String {
-                String::from(#description)
+        impl #impl_generics crate::meta::traits::FilterFactory for #struct_name #ty_generics #where_clause {
+            fn create_instance(&self) -> Box<dyn crate::core::graph::Filter> {
+                Box::from(#struct_name::default()) as Box<dyn crate::core::graph::Filter>
             }
+        }
 
-            fn source_amount(&self) -> usize {
-                #source_amount
-            }
-
-            fn parameters(&self) -> Vec<rustic_meta::Parameter> {
-                vec![#(#parameters),*]
+        pub fn #const_meta_name() -> MetaFilter {
+            MetaFilter {
+                name: #name,
+                description: #description,
+                source_amount: #source_amount,
+                parameters: vec![
+                    #(#parameters),*
+                ],
             }
         }
     };
