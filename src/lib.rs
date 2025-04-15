@@ -77,8 +77,6 @@ fn filter_parameters(input: &DeriveInput) -> Vec<Parameter<String>> {
                         .expect("Field name is required")
                         .to_string();
                     parameters.push(extract_parameter(field_name, token_list.tokens.clone()));
-                } else {
-                    println!("{:?}", field.attrs[position].meta);
                 }
             }
         }
