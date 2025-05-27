@@ -108,7 +108,6 @@ pub fn extract_parameter(name: String, token_stream: TokenStream) -> Parameter<S
     };
 
     let values = stream
-        .into_iter()
         .filter(|e| {
             if let TokenTree::Punct(punct) = e {
                 punct.as_char() != ','
