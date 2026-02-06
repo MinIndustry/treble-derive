@@ -44,14 +44,11 @@ fn filter_input_ports(input: &DeriveInput) -> usize {
                 .attrs
                 .iter()
                 .any(|attr| attr.path().is_ident("filter_source"))
+                && let syn::Type::Array(array) = &field.ty
+                && let syn::Expr::Lit(value) = &array.len
+                && let syn::Lit::Int(value) = &value.lit
             {
-                if let syn::Type::Array(array) = &field.ty {
-                    if let syn::Expr::Lit(value) = &array.len {
-                        if let syn::Lit::Int(value) = &value.lit {
-                            return value.base10_parse().unwrap();
-                        }
-                    }
-                }
+                return value.base10_parse().unwrap();
             }
         }
         1
@@ -69,15 +66,14 @@ fn filter_parameters(input: &DeriveInput) -> Vec<Parameter<String>> {
                 .attrs
                 .iter()
                 .position(|e| e.path().is_ident("filter_parameter"))
+                && let syn::Meta::List(token_list) = &field.attrs[position].meta
             {
-                if let syn::Meta::List(token_list) = &field.attrs[position].meta {
-                    let field_name = field
-                        .ident
-                        .clone()
-                        .expect("Field name is required")
-                        .to_string();
-                    parameters.push(extract_parameter(field_name, token_list.tokens.clone()));
-                }
+                let field_name = field
+                    .ident
+                    .clone()
+                    .expect("Field name is required")
+                    .to_string();
+                parameters.push(extract_parameter(field_name, token_list.tokens.clone()));
             }
         }
     }
