@@ -13,7 +13,7 @@ fn type_name(ty: &syn::Type) -> Option<String> {
 }
 
 fn is_integer_type(ty: &syn::Type) -> bool {
-    type_name(ty).map_or(false, |name| {
+    type_name(ty).is_some_and(|name| {
         matches!(
             name.as_str(),
             "usize"

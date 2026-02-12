@@ -84,6 +84,24 @@ fn filter_parameters(input: &DeriveInput) -> Vec<(Parameter<String>, syn::Type)>
     parameters
 }
 
+fn build_filter_info(
+    meta_params: &[&Parameter<String>],
+    name: &str,
+    description: &str,
+    source_amount: usize,
+) -> proc_macro2::TokenStream {
+    quote! {
+        rustic_meta::FilterInfo {
+            name: #name,
+            description: #description,
+            source_amount: #source_amount,
+            parameters: vec![
+                #(#meta_params),*
+            ],
+        }
+    }
+}
+
 /// Generates the `impl MetaFilter` block containing both `set_parameter` and `metadata`.
 ///
 /// `set_parameter` match arms per parameter type:
@@ -95,10 +113,7 @@ fn filter_parameters(input: &DeriveInput) -> Vec<(Parameter<String>, syn::Type)>
 fn generate_meta_filter_impl(
     struct_name: &syn::Ident,
     parameters: &[(Parameter<String>, syn::Type)],
-    meta_params: &[&Parameter<String>],
-    name: &str,
-    description: &str,
-    source_amount: usize,
+    filter_info: proc_macro2::TokenStream,
     impl_generics: &syn::ImplGenerics,
     ty_generics: &syn::TypeGenerics,
     where_clause: Option<&syn::WhereClause>,
@@ -165,14 +180,7 @@ fn generate_meta_filter_impl(
             }
 
             fn metadata() -> rustic_meta::FilterInfo {
-                rustic_meta::FilterInfo {
-                    name: #name,
-                    description: #description,
-                    source_amount: #source_amount,
-                    parameters: vec![
-                        #(#meta_params),*
-                    ],
-                }
+                #filter_info
             }
         }
     }
@@ -195,13 +203,12 @@ pub fn derive_metadata(item: proc_macro::TokenStream) -> proc_macro::TokenStream
 
     let meta_params: Vec<&Parameter<String>> = parameter_infos.iter().map(|(p, _)| p).collect();
 
+    let filter_info = build_filter_info(&meta_params, &name, &description, source_amount);
+
     let meta_filter_impl = generate_meta_filter_impl(
         struct_name,
         &parameter_infos,
-        &meta_params,
-        &name,
-        &description,
-        source_amount,
+        filter_info,
         &impl_generics,
         &ty_generics,
         where_clause,
