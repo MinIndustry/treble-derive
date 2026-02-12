@@ -3,6 +3,35 @@ use rustic_meta::Parameter;
 
 use convert_case::{Case, Casing};
 
+/// Extracts the simple type name from a syn::Type (e.g., "usize", "f32").
+fn type_name(ty: &syn::Type) -> Option<String> {
+    if let syn::Type::Path(path) = ty {
+        path.path.segments.last().map(|s| s.ident.to_string())
+    } else {
+        None
+    }
+}
+
+fn is_integer_type(ty: &syn::Type) -> bool {
+    type_name(ty).map_or(false, |name| {
+        matches!(
+            name.as_str(),
+            "usize"
+                | "isize"
+                | "u8"
+                | "u16"
+                | "u32"
+                | "u64"
+                | "u128"
+                | "i8"
+                | "i16"
+                | "i32"
+                | "i64"
+                | "i128"
+        )
+    })
+}
+
 /// Extracts the range parameter from the token stream.
 fn extract_range_parameter(
     field_name: String,
@@ -138,6 +167,57 @@ fn extract_int_parameter(
     }
 }
 
+/// Returns the natural bounds (min, max) for bounded integer types.
+/// Types like `usize`, `isize`, `i64`, `u64` are unbounded (too large for i32 metadata).
+fn type_bounds(ty: &syn::Type) -> (Option<i32>, Option<i32>) {
+    match type_name(ty).as_deref() {
+        Some("u8") => (Some(0), Some(u8::MAX as i32)),
+        Some("i8") => (Some(i8::MIN as i32), Some(i8::MAX as i32)),
+        Some("u16") => (Some(0), Some(u16::MAX as i32)),
+        Some("i16") => (Some(i16::MIN as i32), Some(i16::MAX as i32)),
+        // u32/i32 max fits in i32 only for i32; u32::MAX overflows i32
+        Some("u32") => (Some(0), None),
+        Some("usize") => (Some(0), None),
+        // Signed types without useful i32-representable bounds
+        _ => (None, None),
+    }
+}
+
+/// Extracts a `val` parameter by inferring the type from the field.
+/// Integer-like fields produce `Parameter::Int`, float-like fields produce `Parameter::Float`.
+/// Bounded types (u8, i8, u16, i16, etc.) automatically get their natural bounds
+/// when none are explicitly specified.
+/// Syntax: `filter_parameter(val, <default> [, <min> [, <max>]])`
+fn extract_val_parameter(
+    field_name: String,
+    title: String,
+    field_type: &syn::Type,
+    stream: TokenStream,
+) -> Parameter<String> {
+    if is_integer_type(field_type) {
+        let mut param = extract_int_parameter(field_name, title, stream);
+        // Fill in natural type bounds where the user didn't specify them
+        let (type_min, type_max) = type_bounds(field_type);
+        if let Parameter::Int {
+            ref mut min,
+            ref mut max,
+            ..
+        } = param
+        {
+            if min.is_none() {
+                *min = type_min;
+            }
+            if max.is_none() {
+                *max = type_max;
+            }
+        }
+        param
+    } else {
+        // Float-like types
+        extract_float_parameter(field_name, title, stream)
+    }
+}
+
 pub fn extract_vector_parameter(
     field_name: String,
     title: String,
@@ -145,11 +225,19 @@ pub fn extract_vector_parameter(
 ) -> Parameter<String> {
     let mut values = stream.into_iter();
 
-    // First token: the name of the field that determines the vec size
-    let size_field = if let Some(TokenTree::Ident(ident)) = values.next() {
-        ident.to_string()
-    } else {
-        panic!("Expected an identifier for the size field name");
+    // First token: either a field name (Ident) or a constant size (Literal)
+    let size = match values.next() {
+        Some(TokenTree::Ident(ident)) => rustic_meta::ListSize::Field(ident.to_string()),
+        Some(TokenTree::Literal(lit)) => {
+            let n: usize = lit
+                .to_string()
+                .parse()
+                .expect("Expected a positive integer for the constant list size");
+            rustic_meta::ListSize::Constant(n)
+        }
+        _ => panic!(
+            "Expected an identifier (field name) or integer literal (constant size) for list size"
+        ),
     };
 
     // Second token: the element type (float, range, toggle)
@@ -228,7 +316,7 @@ pub fn extract_vector_parameter(
     Parameter::List {
         title,
         field_name,
-        size: size_field,
+        size,
         ltype,
     }
 }
@@ -236,7 +324,11 @@ pub fn extract_vector_parameter(
 /// Iterates through the token stream of a filter_parameter
 /// attribute to extract the parameter name and any additional
 /// information.
-pub fn extract_parameter(name: String, token_stream: TokenStream) -> Parameter<String> {
+pub fn extract_parameter(
+    name: String,
+    field_type: &syn::Type,
+    token_stream: TokenStream,
+) -> Parameter<String> {
     let mut stream = token_stream.into_iter();
     let param_type = if let Some(TokenTree::Ident(token)) = stream.next() {
         token.to_string()
@@ -261,6 +353,7 @@ pub fn extract_parameter(name: String, token_stream: TokenStream) -> Parameter<S
         "toggle" => extract_toggle_parameter(name, parameter_title, values),
         "float" => extract_float_parameter(name, parameter_title, values),
         "int" => extract_int_parameter(name, parameter_title, values),
+        "val" => extract_val_parameter(name, parameter_title, field_type, values),
         "list" | "vec" => extract_vector_parameter(name, parameter_title, values),
         any => panic!("Unknown parameter type: {any}"),
     }
