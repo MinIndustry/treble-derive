@@ -84,16 +84,21 @@ fn filter_parameters(input: &DeriveInput) -> Vec<(Parameter<String>, syn::Type)>
     parameters
 }
 
-/// Generates match arms for `set_parameter` from the extracted parameters.
-/// Each parameter type gets appropriate conversion using the actual field type:
+/// Generates the `impl MetaFilter` block containing both `set_parameter` and `metadata`.
+///
+/// `set_parameter` match arms per parameter type:
 /// - Range: cast to field type with clamping to min/max
 /// - Float/Val(float): cast to field type
 /// - Toggle: `bool` via `value != 0.0`
 /// - Int/Val(int): cast to field type with optional clamping
 /// - List: skipped (can't set with a single f32)
-fn generate_set_parameter(
+fn generate_meta_filter_impl(
     struct_name: &syn::Ident,
     parameters: &[(Parameter<String>, syn::Type)],
+    meta_params: &[&Parameter<String>],
+    name: &str,
+    description: &str,
+    source_amount: usize,
     impl_generics: &syn::ImplGenerics,
     ty_generics: &syn::TypeGenerics,
     where_clause: Option<&syn::WhereClause>,
@@ -158,6 +163,17 @@ fn generate_set_parameter(
                     }
                 }
             }
+
+            fn metadata() -> rustic_meta::FilterInfo {
+                rustic_meta::FilterInfo {
+                    name: #name,
+                    description: #description,
+                    source_amount: #source_amount,
+                    parameters: vec![
+                        #(#meta_params),*
+                    ],
+                }
+            }
         }
     }
 }
@@ -170,7 +186,6 @@ pub fn derive_metadata(item: proc_macro::TokenStream) -> proc_macro::TokenStream
     let input = parse_macro_input!(item as DeriveInput);
 
     let name = input.ident.clone().to_string();
-    let const_meta_name = format_ident!("{}_META", name);
     let description = filter_description(&input);
     let source_amount = filter_input_ports(&input);
     let parameter_infos = filter_parameters(&input);
@@ -178,16 +193,19 @@ pub fn derive_metadata(item: proc_macro::TokenStream) -> proc_macro::TokenStream
     let struct_name = &input.ident;
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
-    let set_parameter_impl = generate_set_parameter(
+    let meta_params: Vec<&Parameter<String>> = parameter_infos.iter().map(|(p, _)| p).collect();
+
+    let meta_filter_impl = generate_meta_filter_impl(
         struct_name,
         &parameter_infos,
+        &meta_params,
+        &name,
+        &description,
+        source_amount,
         &impl_generics,
         &ty_generics,
         where_clause,
     );
-
-    // Extract just the Parameter values for metadata generation
-    let meta_params: Vec<&Parameter<String>> = parameter_infos.iter().map(|(p, _)| p).collect();
 
     let tokens = quote! {
         impl #impl_generics crate::meta::traits::FilterFactory for #struct_name #ty_generics #where_clause {
@@ -196,18 +214,7 @@ pub fn derive_metadata(item: proc_macro::TokenStream) -> proc_macro::TokenStream
             }
         }
 
-        #set_parameter_impl
-
-        pub fn #const_meta_name() -> crate::meta::structs::MetaFilter {
-            crate::meta::structs::MetaFilter {
-                name: #name,
-                description: #description,
-                source_amount: #source_amount,
-                parameters: vec![
-                    #(#meta_params),*
-                ],
-            }
-        }
+        #meta_filter_impl
     };
 
     proc_macro::TokenStream::from(tokens)
