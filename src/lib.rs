@@ -39,19 +39,25 @@ fn filter_description(input: &DeriveInput) -> String {
 /// we return 1.
 fn filter_input_ports(input: &DeriveInput) -> usize {
     if let syn::Data::Struct(filter_structure) = &input.data {
+        let mut total = 0usize;
         for field in filter_structure.fields.iter() {
             if field
                 .attrs
                 .iter()
                 .any(|attr| attr.path().is_ident("filter_source"))
-                && let syn::Type::Array(array) = &field.ty
-                && let syn::Expr::Lit(value) = &array.len
-                && let syn::Lit::Int(value) = &value.lit
             {
-                return value.base10_parse().unwrap();
+                // If the type is [T; N], return N, else 1
+                if let syn::Type::Array(array) = &field.ty
+                    && let syn::Expr::Lit(value) = &array.len
+                    && let syn::Lit::Int(value) = &value.lit
+                {
+                    total += value.base10_parse::<usize>().unwrap_or(1);
+                } else {
+                    total += 1;
+                }
             }
         }
-        1
+        if total == 0 { 1 } else { total }
     } else {
         panic!("FilterMetaData can only be derived for structs");
     }
@@ -84,20 +90,56 @@ fn filter_parameters(input: &DeriveInput) -> Vec<(Parameter<String>, syn::Type)>
     parameters
 }
 
+/// Returns the field_name string from any Parameter variant.
+fn get_param_field_name(param: &Parameter<String>) -> &str {
+    match param {
+        Parameter::Toggle { field_name, .. } => field_name,
+        Parameter::Range { field_name, .. } => field_name,
+        Parameter::Float { field_name, .. } => field_name,
+        Parameter::Int { field_name, .. } => field_name,
+        Parameter::List { field_name, .. } => field_name,
+    }
+}
+
 fn build_filter_info(
-    meta_params: &[&Parameter<String>],
+    parameters: &[(Parameter<String>, syn::Type)],
     name: &str,
     description: &str,
     source_amount: usize,
 ) -> proc_macro2::TokenStream {
+    // One audio FilterInput per audio source port
+    let audio_inputs: Vec<proc_macro2::TokenStream> = (0..source_amount)
+        .map(|_| {
+            quote! { rustic_meta::FilterInput { label: None, parameter: None } }
+        })
+        .collect();
+
+    // One parameter FilterInput per filter_parameter field (skip List params)
+    let param_inputs: Vec<proc_macro2::TokenStream> = parameters
+        .iter()
+        .filter_map(|(param, _)| {
+            if matches!(param, Parameter::List { .. }) {
+                return None;
+            }
+            let label = get_param_field_name(param);
+            Some(quote! {
+                rustic_meta::FilterInput {
+                    label: Some(#label),
+                    parameter: Some(#param),
+                }
+            })
+        })
+        .collect();
+
     quote! {
         rustic_meta::FilterInfo {
             name: #name,
             description: #description,
-            source_amount: #source_amount,
-            parameters: vec![
-                #(#meta_params),*
+            inputs: vec![
+                #(#audio_inputs,)*
+                #(#param_inputs,)*
             ],
+            outputs: 1,
         }
     }
 }
@@ -201,9 +243,7 @@ pub fn derive_metadata(item: proc_macro::TokenStream) -> proc_macro::TokenStream
     let struct_name = &input.ident;
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
-    let meta_params: Vec<&Parameter<String>> = parameter_infos.iter().map(|(p, _)| p).collect();
-
-    let filter_info = build_filter_info(&meta_params, &name, &description, source_amount);
+    let filter_info = build_filter_info(&parameter_infos, &name, &description, source_amount);
 
     let meta_filter_impl = generate_meta_filter_impl(
         struct_name,
