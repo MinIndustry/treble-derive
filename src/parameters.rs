@@ -42,18 +42,41 @@ fn extract_range_parameter(
     let minimum = values
         .next()
         .unwrap_or_else(|| panic!("No minimum value found"));
+    let minimum = if let TokenTree::Punct(e) = minimum {
+        let minimum = values
+            .next()
+            .unwrap_or_else(|| panic!("No minimum value found"));
+
+        let minimum: f32 = if let TokenTree::Literal(m) = minimum {
+            m.to_string().parse().unwrap()
+        } else {
+            panic!("Minimum value is not a literal: found {:?}", minimum);
+        };
+
+        match e.as_char() {
+            '-' => -minimum,
+            '+' => minimum,
+            _ => panic!(
+                "Unable to parse minimum value, Punct must be in [+, -] but found {:?}",
+                e
+            ),
+        }
+    } else if matches!(minimum, TokenTree::Literal(_)) {
+        if let TokenTree::Literal(m) = minimum {
+            m.to_string().parse().unwrap()
+        } else {
+            panic!("Minimum value is not a literal: found {:?}", minimum);
+        }
+    } else {
+        panic!("Expected literal or Punct for minimum value");
+    };
+
     let maximum = values
         .next()
         .unwrap_or_else(|| panic!("No maximum value found"));
     let default = values
         .next()
         .unwrap_or_else(|| panic!("No default value found"));
-
-    let minimum = if let TokenTree::Literal(minimum) = minimum {
-        minimum.to_string().parse().unwrap()
-    } else {
-        panic!("Minimum value is not a literal");
-    };
 
     let maximum = if let TokenTree::Literal(maximum) = maximum {
         maximum.to_string().parse().unwrap()

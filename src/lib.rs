@@ -216,7 +216,7 @@ fn generate_meta_filter_impl(
                 match name {
                     #(#arms)*
                     _other => {
-                        log::warn!("Unknown parameter '{}' for {}", _other, #filter_name);
+                        log::debug!("Unknown parameter '{}' for {}", _other, #filter_name);
                     }
                 }
             }
@@ -258,6 +258,15 @@ pub fn derive_metadata(item: proc_macro::TokenStream) -> proc_macro::TokenStream
         impl #impl_generics crate::meta::traits::FilterFactory for #struct_name #ty_generics #where_clause {
             fn create_instance(&self) -> Box<dyn crate::core::graph::Filter> {
                 Box::from(#struct_name::default()) as Box<dyn crate::core::graph::Filter>
+            }
+        }
+
+        inventory::submit! {
+            crate::meta::FilterRegistration {
+                // UFCS avoids requiring `use rustic_meta::MetaFilter;` in the filter's file.
+                info: <#struct_name as rustic_meta::MetaFilter>::metadata,
+                // Non-capturing closure coerces to fn() pointer.
+                create: (|| Box::new(#struct_name::default()) as Box<dyn crate::core::graph::Filter>),
             }
         }
 
