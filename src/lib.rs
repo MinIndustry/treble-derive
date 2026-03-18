@@ -1,6 +1,7 @@
 use quote::{format_ident, quote};
 use syn::{DeriveInput, parse_macro_input};
 
+mod helpers;
 mod parameters;
 
 use parameters::extract_parameter;
@@ -114,6 +115,9 @@ fn build_filter_info(
         })
         .collect();
 
+    let type_id = name;
+    let name = helpers::to_natural(name);
+
     // One parameter FilterInput per filter_parameter field (skip List params)
     let param_inputs: Vec<proc_macro2::TokenStream> = parameters
         .iter()
@@ -134,6 +138,7 @@ fn build_filter_info(
     quote! {
         rustic_meta::FilterInfo {
             name: #name,
+            type_id: #type_id,
             description: #description,
             inputs: vec![
                 #(#audio_inputs,)*
