@@ -84,6 +84,7 @@ dependencies = [
 [[package]]
 name = "treble-meta"
 version = "0.1.0"
+source = "git+https://github.com/MinIndustry/treble-meta.git#2fb9a3c842b82ff3fa5b90f5fb87c472df02c8e0"
 dependencies = [
  "proc-macro2",
  "quote",
