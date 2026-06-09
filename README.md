@@ -1,2 +1,2 @@
 # Rustice Derive
-Derive macros for Rustic filters.
+Derive macros for Treble filters.

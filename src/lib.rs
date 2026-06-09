@@ -5,7 +5,7 @@ mod helpers;
 mod parameters;
 
 use parameters::extract_parameter;
-use rustic_meta::Parameter;
+use treble_meta::Parameter;
 
 /// Extracts the description from the filter's
 /// docstring. If multiple docstrings are found,
@@ -111,7 +111,7 @@ fn build_filter_info(
     // One audio FilterInput per audio source port
     let audio_inputs: Vec<proc_macro2::TokenStream> = (0..source_amount)
         .map(|_| {
-            quote! { rustic_meta::FilterInput { label: None, parameter: None } }
+            quote! { treble_meta::FilterInput { label: None, parameter: None } }
         })
         .collect();
 
@@ -127,7 +127,7 @@ fn build_filter_info(
             }
             let label = get_param_field_name(param);
             Some(quote! {
-                rustic_meta::FilterInput {
+                treble_meta::FilterInput {
                     label: Some(#label),
                     parameter: Some(#param),
                 }
@@ -136,7 +136,7 @@ fn build_filter_info(
         .collect();
 
     quote! {
-        rustic_meta::FilterInfo {
+        treble_meta::FilterInfo {
             name: #name,
             type_id: #type_id,
             description: #description,
@@ -216,7 +216,7 @@ fn generate_meta_filter_impl(
     let filter_name = struct_name.to_string();
 
     quote! {
-        impl #impl_generics rustic_meta::MetaFilter for #struct_name #ty_generics #where_clause {
+        impl #impl_generics treble_meta::MetaFilter for #struct_name #ty_generics #where_clause {
             fn set_parameter(&mut self, name: &str, value: f32) {
                 match name {
                     #(#arms)*
@@ -226,7 +226,7 @@ fn generate_meta_filter_impl(
                 }
             }
 
-            fn metadata() -> rustic_meta::FilterInfo {
+            fn metadata() -> treble_meta::FilterInfo {
                 #filter_info
             }
         }
@@ -268,8 +268,8 @@ pub fn derive_metadata(item: proc_macro::TokenStream) -> proc_macro::TokenStream
 
         inventory::submit! {
             crate::meta::FilterRegistration {
-                // UFCS avoids requiring `use rustic_meta::MetaFilter;` in the filter's file.
-                info: <#struct_name as rustic_meta::MetaFilter>::metadata,
+                // UFCS avoids requiring `use treble_meta::MetaFilter;` in the filter's file.
+                info: <#struct_name as treble_meta::MetaFilter>::metadata,
                 // Non-capturing closure coerces to fn() pointer.
                 create: (|| Box::new(#struct_name::default()) as Box<dyn crate::core::graph::Filter>),
             }

@@ -1,5 +1,5 @@
 [package]
-name = "rustic-derive"
+name = "treble-derive"
 description = "Macros for generating filter metadata"
 version = "0.1.0"
 edition = "2024"
@@ -12,4 +12,4 @@ convert_case = "0.8.0"
 proc-macro2 = "1.0.94"
 quote = "1.0.39"
 syn = "2.0.99"
-rustic-meta = { path = "../rustic-meta" }
+treble-meta = { git = "https://github.com/MinIndustry/treble-meta.git" }

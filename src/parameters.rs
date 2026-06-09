@@ -1,5 +1,5 @@
 use proc_macro2::{TokenStream, TokenTree};
-use rustic_meta::Parameter;
+use treble_meta::Parameter;
 
 use convert_case::{Case, Casing};
 
@@ -250,13 +250,13 @@ pub fn extract_vector_parameter(
 
     // First token: either a field name (Ident) or a constant size (Literal)
     let size = match values.next() {
-        Some(TokenTree::Ident(ident)) => rustic_meta::ListSize::Field(ident.to_string()),
+        Some(TokenTree::Ident(ident)) => treble_meta::ListSize::Field(ident.to_string()),
         Some(TokenTree::Literal(lit)) => {
             let n: usize = lit
                 .to_string()
                 .parse()
                 .expect("Expected a positive integer for the constant list size");
-            rustic_meta::ListSize::Constant(n)
+            treble_meta::ListSize::Constant(n)
         }
         _ => panic!(
             "Expected an identifier (field name) or integer literal (constant size) for list size"
@@ -284,7 +284,7 @@ pub fn extract_vector_parameter(
                         .expect("Expected a float default value")
                 })
                 .unwrap_or(0.0);
-            rustic_meta::Literal::Float(element_title, default)
+            treble_meta::Literal::Float(element_title, default)
         }
         "range" => {
             let min: f32 = remaining
@@ -303,7 +303,7 @@ pub fn extract_vector_parameter(
                         .expect("Expected a float default value")
                 })
                 .unwrap_or(0.0);
-            rustic_meta::Literal::Range(element_title, min, max, default)
+            treble_meta::Literal::Range(element_title, min, max, default)
         }
         "toggle" => {
             let default: bool = remaining
@@ -314,7 +314,7 @@ pub fn extract_vector_parameter(
                         .expect("Expected a bool default value")
                 })
                 .unwrap_or(false);
-            rustic_meta::Literal::Toggle(element_title, default)
+            treble_meta::Literal::Toggle(element_title, default)
         }
         "int" => {
             let default: i32 = remaining
@@ -331,7 +331,7 @@ pub fn extract_vector_parameter(
             let max: Option<i32> = remaining
                 .get(2)
                 .map(|t| t.to_string().parse().expect("Expected an int max value"));
-            rustic_meta::Literal::Int(element_title, default, min, max)
+            treble_meta::Literal::Int(element_title, default, min, max)
         }
         other => panic!("Unknown element type for list parameter: {other}"),
     };
