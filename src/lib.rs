@@ -176,19 +176,19 @@ fn generate_meta_filter_impl(
             } => {
                 let ident = format_ident!("{}", field_name);
                 Some(quote! {
-                    #field_name => { self.#ident = (value as #field_type).clamp(#min as #field_type, #max as #field_type); }
+                    #field_name => { self.#ident = (value as #field_type).clamp(#min as #field_type, #max as #field_type); true }
                 })
             }
             Parameter::Float { field_name, .. } => {
                 let ident = format_ident!("{}", field_name);
                 Some(quote! {
-                    #field_name => { self.#ident = value as #field_type; }
+                    #field_name => { self.#ident = value as #field_type; true }
                 })
             }
             Parameter::Toggle { field_name, .. } => {
                 let ident = format_ident!("{}", field_name);
                 Some(quote! {
-                    #field_name => { self.#ident = value != 0.0; }
+                    #field_name => { self.#ident = value != 0.0; true }
                 })
             }
             Parameter::Int {
@@ -206,23 +206,38 @@ fn generate_meta_filter_impl(
                     (None, None) => cast,
                 };
                 Some(quote! {
-                    #field_name => { self.#ident = #assignment; }
+                    #field_name => { self.#ident = #assignment; true }
                 })
             }
             Parameter::List { .. } => None,
         })
         .collect();
-
-    let filter_name = struct_name.to_string();
+    let supported_names: Vec<&String> = parameters
+        .iter()
+        .filter_map(|(parameter, _)| match parameter {
+            Parameter::Range { field_name, .. }
+            | Parameter::Float { field_name, .. }
+            | Parameter::Toggle { field_name, .. }
+            | Parameter::Int { field_name, .. } => Some(field_name),
+            Parameter::List { .. } => None,
+        })
+        .collect();
+    let supports_expression = if supported_names.is_empty() {
+        quote! { false }
+    } else {
+        quote! { matches!(name, #(#supported_names)|*) }
+    };
 
     quote! {
         impl #impl_generics treble_meta::MetaFilter for #struct_name #ty_generics #where_clause {
-            fn set_parameter(&mut self, name: &str, value: f32) {
+            fn supports_parameter(&self, name: &str) -> bool {
+                #supports_expression
+            }
+
+            fn set_parameter(&mut self, name: &str, value: f32) -> bool {
                 match name {
                     #(#arms)*
-                    _other => {
-                        log::debug!("Unknown parameter '{}' for {}", _other, #filter_name);
-                    }
+                    _ => false,
                 }
             }
 
