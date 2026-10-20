@@ -72,7 +72,7 @@ dependencies = [
 
 [[package]]
 name = "treble-derive"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "convert_case",
  "proc-macro2",
@@ -83,8 +83,9 @@ dependencies = [
 
 [[package]]
 name = "treble-meta"
-version = "0.1.0"
-source = "git+https://github.com/MinIndustry/treble-meta.git?tag=0.1.0#2fb9a3c842b82ff3fa5b90f5fb87c472df02c8e0"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9d4c5ae50588a53b88109f9089ac62189c276de46fa35b43fb1b4c7706432f01"
 dependencies = [
  "proc-macro2",
  "quote",
