@@ -186,6 +186,13 @@ pub fn parameters(input: &DeriveInput, model: &Model) -> TokenStream {
         quote!("value is not representable by the Rust field type".into()),
     );
     let wrong = failure(m, quote!("value does not match parameter type".into()));
+    let validation = quote! {
+        parameter.validate_value(&value).map_err(|errors| #m::ValidationErrors(
+            errors.0.into_iter().map(|error| #m::ValidationError {
+                path: format!("parameters.{}", id), message: error.message,
+            }).collect()
+        ))?;
+    };
     let getters = model.parameters.iter().map(|p| {
         let id = &p.descriptor.id;
         let field = &p.field;
@@ -216,6 +223,8 @@ pub fn parameters(input: &DeriveInput, model: &Model) -> TokenStream {
                 let #m::ParameterValue::Float(number) = value else { return Err(#wrong); };
                 let converted = number as #ty;
                 if !converted.is_finite() { return Err(#invalid); }
+                let value = #m::ParameterValue::Float(::core::convert::Into::<f64>::into(converted));
+                #validation
                 converted
             }),
             Kind::Int => quote!({
@@ -251,11 +260,11 @@ pub fn parameters(input: &DeriveInput, model: &Model) -> TokenStream {
                 let descriptor = <Self as #m::ModuleMetadata>::descriptor();
                 let parameter = descriptor.parameters.iter().find(|p| p.id == id).ok_or_else(|| #unknown)?;
                 if parameter.access == #m::ParameterAccess::Engine { return Err(#readonly); }
-                parameter.validate_value(&value).map_err(|errors| #m::ValidationErrors(
-                    errors.0.into_iter().map(|error| #m::ValidationError {
-                        path: format!("parameters.{}", id), message: error.message,
-                    }).collect()
-                ))?;
+                // Float bounds describe the field's representable domain, so
+                // check those after conversion. Other kinds validate directly.
+                if parameter.value_type != #m::ValueType::Float {
+                    #validation
+                }
                 match id { #(#setters)* _ => Err(#unknown) }
             }
         }

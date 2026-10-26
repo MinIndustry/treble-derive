@@ -78,8 +78,9 @@ These names avoid collisions with the legacy scalar `MetaFilter::set_parameter`.
 Errors use the shared path/message structures, with paths such as
 `parameters.frequency`; no per-module public error types are generated.
 
-Setters validate the typed value, ownership, finiteness and declared domain before
-assignment, then check conversion to the Rust field type. They reject wrong types,
+Setters check ownership, type and representability before assignment. Float values
+are converted to the field representation before validating the declared domain;
+other kinds validate directly before checked conversion. They reject wrong types,
 unknown IDs, unknown enum IDs, integer overflow and float overflow without clamping.
 A `Rebuild` result is a hint: the **configuration has changed**, but no graph is
 compiled or installed. Hosts should apply structural changes to their draft
@@ -151,7 +152,9 @@ the value fits that representation; narrower fields use checked conversions. No
 range is silently inferred for a field: declare one to constrain the UI.
 For direct `f32` fields, defaults and numeric bounds are quantized through `f32`
 before descriptor validation. Consequently a fractional endpoint remains reachable
-and getter/setter round-trips stay within the advertised domain. Bounds that become
+and getter/setter round-trips stay within the advertised domain. Decimal float
+inputs are converted before domain validation, so entering `0.3` reaches a lower
+endpoint stored as its nearest f32 value. Bounds that become
 nonfinite or collapse to one value are rejected. Aliases cannot be resolved by a
 procedural macro; authors must validate their generated descriptors explicitly.
 

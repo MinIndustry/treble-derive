@@ -230,6 +230,17 @@ fn fractional_f32_endpoints_round_trip_through_typed_setters() {
         upper: 0.3,
         lower: 0.3,
     };
+    instance
+        .set_parameter_value("upper", ParameterValue::Float(0.3))
+        .unwrap();
+    instance
+        .set_parameter_value("lower", ParameterValue::Float(0.3))
+        .unwrap();
+    assert!(
+        instance
+            .set_parameter_value("lower", ParameterValue::Float(0.2))
+            .is_err()
+    );
     for p in d.parameters {
         instance
             .set_parameter_value(&p.id, p.default.clone())
