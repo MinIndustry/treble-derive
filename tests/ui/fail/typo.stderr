@@ -1,0 +1,5 @@
+error: unknown option `defaut`; did you mean `default`?
+ --> tests/ui/fail/typo.rs:4:36
+  |
+4 | struct Bad { #[treble(param(id="x",defaut=1.0))] x:f32 }
+  |                                    ^^^^^^

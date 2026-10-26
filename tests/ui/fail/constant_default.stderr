@@ -1,0 +1,5 @@
+error: expected a numeric literal (constant expressions are not supported here)
+ --> tests/ui/fail/constant_default.rs:5:44
+  |
+5 | struct Bad { #[treble(param(id="x",default=DEFAULT))] x:f32 }
+  |                                            ^^^^^^^

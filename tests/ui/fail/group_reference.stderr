@@ -1,0 +1,11 @@
+error: unknown parameter `missing`
+ --> tests/ui/fail/group_reference.rs:4:10
+  |
+4 | #[treble(group(id="env",widget=envelope(attack="a",decay="d",sustain="s",release="missing")))]
+  |          ^^^^^
+
+error: envelope binding requires a numeric parameter
+ --> tests/ui/fail/group_reference.rs:4:82
+  |
+4 | #[treble(group(id="env",widget=envelope(attack="a",decay="d",sustain="s",release="missing")))]
+  |                                                                                  ^^^^^^^^^

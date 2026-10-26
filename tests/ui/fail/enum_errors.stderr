@@ -1,0 +1,17 @@
+error: duplicate enum value ID `same`
+ --> tests/ui/fail/enum_errors.rs:5:20
+  |
+5 |     #[treble(value(id="same"))] B,
+  |                    ^^
+
+error: missing #[treble(value(id = "..."))]
+ --> tests/ui/fail/enum_errors.rs:6:5
+  |
+6 |     C,
+  |     ^
+
+error: ParameterEnum variants must be unit variants
+ --> tests/ui/fail/enum_errors.rs:7:37
+  |
+7 |     #[treble(value(id="data"))] Data(u32),
+  |                                     ^^^^^

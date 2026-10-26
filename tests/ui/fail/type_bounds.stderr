@@ -1,0 +1,23 @@
+error: module version must be positive
+ --> tests/ui/fail/type_bounds.rs:3:32
+  |
+3 | #[treble(module(id="x",version=0))]
+  |                                ^
+
+error: numeric value must be finite
+ --> tests/ui/fail/type_bounds.rs:6:39
+  |
+6 |     #[treble(param(id="float",default=1e100))] float:f32,
+  |                                       ^^^^^
+
+error: default is not representable by field type `u8`
+ --> tests/ui/fail/type_bounds.rs:5:39
+  |
+5 |     #[treble(param(id="small",default=256))] small:u8,
+  |                                       ^^^
+
+error: default is not representable as finite f32
+ --> tests/ui/fail/type_bounds.rs:6:39
+  |
+6 |     #[treble(param(id="float",default=1e100))] float:f32,
+  |                                       ^^^^^

@@ -1,0 +1,5 @@
+error: duplicate option `default`
+ --> tests/ui/fail/duplicate_options.rs:4:48
+  |
+4 | struct Bad { #[treble(param(id="x",default=0.0,default=1.0))] x:f32 }
+  |                                                ^^^^^^^

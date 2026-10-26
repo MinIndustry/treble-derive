@@ -1,0 +1,5 @@
+error: expected 3..=3 positional arguments, found 1
+ --> tests/ui/fail/legacy_malformed.rs:3:33
+  |
+3 | struct Bad { #[filter_parameter(range, 1.0)] x:f32 }
+  |                                 ^^^^^

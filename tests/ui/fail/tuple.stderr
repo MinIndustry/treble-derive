@@ -1,0 +1,5 @@
+error: module derives require named fields or a unit struct
+ --> tests/ui/fail/tuple.rs:4:11
+  |
+4 | struct Bad(f32);
+  |           ^^^^^

@@ -1,21 +1,90 @@
-use proc_macro2::{TokenStream, TokenTree};
-use treble_meta::Parameter;
-
+//! Legacy positional parameter grammar. Kept compatible, with spanned errors.
 use convert_case::{Case, Casing};
+use proc_macro2::{Span, TokenStream};
+use syn::{
+    Expr, Ident, Result, Token,
+    parse::{Parse, ParseStream},
+    punctuated::Punctuated,
+    spanned::Spanned,
+};
+use treble_meta::{ListSize, Literal, Parameter};
 
-/// Extracts the simple type name from a syn::Type (e.g., "usize", "f32").
+struct Arguments {
+    kind: Ident,
+    values: Vec<Expr>,
+}
+impl Parse for Arguments {
+    fn parse(input: ParseStream<'_>) -> Result<Self> {
+        let kind = input.parse()?;
+        if input.is_empty() {
+            return Ok(Self {
+                kind,
+                values: vec![],
+            });
+        }
+        input.parse::<Token![,]>()?;
+        let values = Punctuated::<Expr, Token![,]>::parse_terminated(input)?
+            .into_iter()
+            .collect();
+        Ok(Self { kind, values })
+    }
+}
+fn number(e: &Expr) -> Result<f32> {
+    let n = crate::module::attrs::number(e)?;
+    let n = n as f32;
+    if !n.is_finite() {
+        return Err(syn::Error::new(
+            e.span(),
+            "value must be representable as finite f32",
+        ));
+    }
+    Ok(n)
+}
+fn int(e: &Expr) -> Result<i32> {
+    let n = crate::module::attrs::number(e)?;
+    if n.fract() != 0.0 || n < f64::from(i32::MIN) || n > f64::from(i32::MAX) {
+        return Err(syn::Error::new(
+            e.span(),
+            "expected an integer literal fitting i32",
+        ));
+    }
+    Ok(n as i32)
+}
+fn boolean(e: &Expr) -> Result<bool> {
+    if let Expr::Lit(syn::ExprLit {
+        lit: syn::Lit::Bool(b),
+        ..
+    }) = e
+    {
+        Ok(b.value)
+    } else {
+        Err(syn::Error::new(e.span(), "expected true or false"))
+    }
+}
+fn count(values: &[Expr], min: usize, max: usize, span: Span) -> Result<()> {
+    if values.len() < min || values.len() > max {
+        Err(syn::Error::new(
+            span,
+            format!(
+                "expected {min}..={max} positional arguments, found {}",
+                values.len()
+            ),
+        ))
+    } else {
+        Ok(())
+    }
+}
 fn type_name(ty: &syn::Type) -> Option<String> {
-    if let syn::Type::Path(path) = ty {
-        path.path.segments.last().map(|s| s.ident.to_string())
+    if let syn::Type::Path(p) = ty {
+        p.path.segments.last().map(|s| s.ident.to_string())
     } else {
         None
     }
 }
-
-fn is_integer_type(ty: &syn::Type) -> bool {
-    type_name(ty).is_some_and(|name| {
-        matches!(
-            name.as_str(),
+fn integer_type(ty: &syn::Type) -> bool {
+    matches!(
+        type_name(ty).as_deref(),
+        Some(
             "usize"
                 | "isize"
                 | "u8"
@@ -29,355 +98,231 @@ fn is_integer_type(ty: &syn::Type) -> bool {
                 | "i64"
                 | "i128"
         )
-    })
+    )
 }
-
-/// Extracts the range parameter from the token stream.
-fn extract_range_parameter(
-    field_name: String,
-    title: String,
-    stream: TokenStream,
-) -> Parameter<String> {
-    let mut values = stream.into_iter();
-    let minimum = values
-        .next()
-        .unwrap_or_else(|| panic!("No minimum value found"));
-    let minimum = if let TokenTree::Punct(e) = minimum {
-        let minimum = values
-            .next()
-            .unwrap_or_else(|| panic!("No minimum value found"));
-
-        let minimum: f32 = if let TokenTree::Literal(m) = minimum {
-            m.to_string().parse().unwrap()
-        } else {
-            panic!("Minimum value is not a literal: found {:?}", minimum);
-        };
-
-        match e.as_char() {
-            '-' => -minimum,
-            '+' => minimum,
-            _ => panic!(
-                "Unable to parse minimum value, Punct must be in [+, -] but found {:?}",
-                e
-            ),
-        }
-    } else if matches!(minimum, TokenTree::Literal(_)) {
-        if let TokenTree::Literal(m) = minimum {
-            m.to_string().parse().unwrap()
-        } else {
-            panic!("Minimum value is not a literal: found {:?}", minimum);
-        }
-    } else {
-        panic!("Expected literal or Punct for minimum value");
-    };
-
-    let maximum = values
-        .next()
-        .unwrap_or_else(|| panic!("No maximum value found"));
-    let default = values
-        .next()
-        .unwrap_or_else(|| panic!("No default value found"));
-
-    let maximum = if let TokenTree::Literal(maximum) = maximum {
-        maximum.to_string().parse().unwrap()
-    } else {
-        panic!("Maximum value is not a literal");
-    };
-
-    let default = if let TokenTree::Literal(default) = default {
-        default.to_string().parse().unwrap()
-    } else {
-        panic!("Default value is not a literal");
-    };
-
-    Parameter::Range {
-        title,
-        field_name,
-        min: minimum,
-        max: maximum,
-        default,
-        value: default,
-    }
-}
-
-/// Extracts the toggle parameter from the token stream.
-fn extract_toggle_parameter(
-    field_name: String,
-    title: String,
-    stream: TokenStream,
-) -> Parameter<String> {
-    let mut values = stream.into_iter();
-    if let Some(value) = values.next() {
-        let value = if let TokenTree::Literal(value) = value {
-            value.to_string().parse().unwrap()
-        } else {
-            panic!("Value is not a literal");
-        };
-
-        Parameter::Toggle {
-            title,
-            field_name,
-            value,
-            default: value,
-        }
-    } else {
-        panic!("No value found for toggle parameter");
-    }
-}
-
-/// Extracts the float parameter from the token stream.
-/// A float parameter is an unbounded parameter (contrary to
-/// a range parameter).
-fn extract_float_parameter(
-    field_name: String,
-    title: String,
-    stream: TokenStream,
-) -> Parameter<String> {
-    let value = stream.into_iter().next().unwrap();
-    let value = if let TokenTree::Literal(value) = value {
-        value.to_string().parse().unwrap()
-    } else {
-        panic!("Value is not a literal");
-    };
-
-    Parameter::Float {
-        title,
-        field_name,
-        default: value,
-        value,
-    }
-}
-
-/// Extracts the int parameter from the token stream.
-/// Syntax: `filter_parameter(int, <default>)` or
-///         `filter_parameter(int, <default>, <min>)` or
-///         `filter_parameter(int, <default>, <min>, <max>)`
-fn extract_int_parameter(
-    field_name: String,
-    title: String,
-    stream: TokenStream,
-) -> Parameter<String> {
-    let values: Vec<TokenTree> = stream.into_iter().collect();
-
-    let default: i32 = values
-        .first()
-        .map(|t| {
-            t.to_string()
-                .parse()
-                .expect("Expected an integer default value")
-        })
-        .expect("No default value found for int parameter");
-
-    let min: Option<i32> = values.get(1).map(|t| {
-        t.to_string()
-            .parse()
-            .expect("Expected an integer min value")
-    });
-
-    let max: Option<i32> = values.get(2).map(|t| {
-        t.to_string()
-            .parse()
-            .expect("Expected an integer max value")
-    });
-
-    Parameter::Int {
-        title,
-        field_name,
-        default,
-        value: default,
-        min,
-        max,
-    }
-}
-
-/// Returns the natural bounds (min, max) for bounded integer types.
-/// Types like `usize`, `isize`, `i64`, `u64` are unbounded (too large for i32 metadata).
-fn type_bounds(ty: &syn::Type) -> (Option<i32>, Option<i32>) {
+fn bounds(ty: &syn::Type) -> (Option<i32>, Option<i32>) {
     match type_name(ty).as_deref() {
-        Some("u8") => (Some(0), Some(u8::MAX as i32)),
-        Some("i8") => (Some(i8::MIN as i32), Some(i8::MAX as i32)),
-        Some("u16") => (Some(0), Some(u16::MAX as i32)),
-        Some("i16") => (Some(i16::MIN as i32), Some(i16::MAX as i32)),
-        // u32/i32 max fits in i32 only for i32; u32::MAX overflows i32
-        Some("u32") => (Some(0), None),
-        Some("usize") => (Some(0), None),
-        // Signed types without useful i32-representable bounds
+        Some("u8") => (Some(0), Some(i32::from(u8::MAX))),
+        Some("u16") => (Some(0), Some(i32::from(u16::MAX))),
+        Some("i8") => (Some(i32::from(i8::MIN)), Some(i32::from(i8::MAX))),
+        Some("i16") => (Some(i32::from(i16::MIN)), Some(i32::from(i16::MAX))),
+        Some("u32" | "usize") => (Some(0), None),
         _ => (None, None),
     }
 }
 
-/// Extracts a `val` parameter by inferring the type from the field.
-/// Integer-like fields produce `Parameter::Int`, float-like fields produce `Parameter::Float`.
-/// Bounded types (u8, i8, u16, i16, etc.) automatically get their natural bounds
-/// when none are explicitly specified.
-/// Syntax: `filter_parameter(val, <default> [, <min> [, <max>]])`
-fn extract_val_parameter(
-    field_name: String,
-    title: String,
-    field_type: &syn::Type,
-    stream: TokenStream,
-) -> Parameter<String> {
-    if is_integer_type(field_type) {
-        let mut param = extract_int_parameter(field_name, title, stream);
-        // Fill in natural type bounds where the user didn't specify them
-        let (type_min, type_max) = type_bounds(field_type);
-        if let Parameter::Int {
-            ref mut min,
-            ref mut max,
-            ..
-        } = param
-        {
-            if min.is_none() {
-                *min = type_min;
-            }
-            if max.is_none() {
-                *max = type_max;
-            }
-        }
-        param
-    } else {
-        // Float-like types
-        extract_float_parameter(field_name, title, stream)
-    }
-}
-
-pub fn extract_vector_parameter(
-    field_name: String,
-    title: String,
-    stream: TokenStream,
-) -> Parameter<String> {
-    let mut values = stream.into_iter();
-
-    // First token: either a field name (Ident) or a constant size (Literal)
-    let size = match values.next() {
-        Some(TokenTree::Ident(ident)) => treble_meta::ListSize::Field(ident.to_string()),
-        Some(TokenTree::Literal(lit)) => {
-            let n: usize = lit
-                .to_string()
-                .parse()
-                .expect("Expected a positive integer for the constant list size");
-            treble_meta::ListSize::Constant(n)
-        }
-        _ => panic!(
-            "Expected an identifier (field name) or integer literal (constant size) for list size"
-        ),
-    };
-
-    // Second token: the element type (float, range, toggle)
-    let ltype_name = if let Some(TokenTree::Ident(ident)) = values.next() {
-        ident.to_string()
-    } else {
-        panic!("Expected an identifier for the element type");
-    };
-
-    // Remaining tokens: parameters for the element type
-    let remaining: Vec<TokenTree> = values.collect();
-
-    let element_title = title.clone();
-    let ltype = match ltype_name.as_str() {
-        "float" => {
-            let default: f32 = remaining
-                .first()
-                .map(|t| {
-                    t.to_string()
-                        .parse()
-                        .expect("Expected a float default value")
-                })
-                .unwrap_or(0.0);
-            treble_meta::Literal::Float(element_title, default)
-        }
-        "range" => {
-            let min: f32 = remaining
-                .first()
-                .map(|t| t.to_string().parse().expect("Expected a float min value"))
-                .unwrap_or(0.0);
-            let max: f32 = remaining
-                .get(1)
-                .map(|t| t.to_string().parse().expect("Expected a float max value"))
-                .unwrap_or(1.0);
-            let default: f32 = remaining
-                .get(2)
-                .map(|t| {
-                    t.to_string()
-                        .parse()
-                        .expect("Expected a float default value")
-                })
-                .unwrap_or(0.0);
-            treble_meta::Literal::Range(element_title, min, max, default)
-        }
-        "toggle" => {
-            let default: bool = remaining
-                .first()
-                .map(|t| {
-                    t.to_string()
-                        .parse()
-                        .expect("Expected a bool default value")
-                })
-                .unwrap_or(false);
-            treble_meta::Literal::Toggle(element_title, default)
-        }
-        "int" => {
-            let default: i32 = remaining
-                .first()
-                .map(|t| {
-                    t.to_string()
-                        .parse()
-                        .expect("Expected an int default value")
-                })
-                .unwrap_or(0);
-            let min: Option<i32> = remaining
-                .get(1)
-                .map(|t| t.to_string().parse().expect("Expected an int min value"));
-            let max: Option<i32> = remaining
-                .get(2)
-                .map(|t| t.to_string().parse().expect("Expected an int max value"));
-            treble_meta::Literal::Int(element_title, default, min, max)
-        }
-        other => panic!("Unknown element type for list parameter: {other}"),
-    };
-
-    Parameter::List {
-        title,
-        field_name,
-        size,
-        ltype,
-    }
-}
-
-/// Iterates through the token stream of a filter_parameter
-/// attribute to extract the parameter name and any additional
-/// information.
 pub fn extract_parameter(
     name: String,
-    field_type: &syn::Type,
-    token_stream: TokenStream,
-) -> Parameter<String> {
-    let mut stream = token_stream.into_iter();
-    let param_type = if let Some(TokenTree::Ident(token)) = stream.next() {
-        token.to_string()
+    ty: &syn::Type,
+    tokens: TokenStream,
+) -> Result<Parameter<String>> {
+    let Arguments { kind, values } = syn::parse2(tokens)?;
+    let span = kind.span();
+    let title = name.to_case(Case::Title);
+    let kind = if kind == "val" {
+        if integer_type(ty) {
+            "int".into()
+        } else {
+            "float".into()
+        }
     } else {
-        panic!("No parameter type found");
+        kind.to_string()
     };
-
-    let values = stream
-        .filter(|e| {
-            if let TokenTree::Punct(punct) = e {
-                punct.as_char() != ','
-            } else {
-                true
+    match kind.as_str() {
+        "range" => {
+            count(&values, 3, 3, span)?;
+            let (min, max, default) = (
+                number(&values[0])?,
+                number(&values[1])?,
+                number(&values[2])?,
+            );
+            if min > max || default < min || default > max {
+                return Err(syn::Error::new(
+                    span,
+                    "range requires min <= default <= max",
+                ));
             }
-        })
-        .collect();
+            Ok(Parameter::Range {
+                title,
+                field_name: name,
+                min,
+                max,
+                default,
+                value: default,
+            })
+        }
+        "float" => {
+            count(&values, 1, 1, span)?;
+            let default = number(&values[0])?;
+            Ok(Parameter::Float {
+                title,
+                field_name: name,
+                default,
+                value: default,
+            })
+        }
+        "toggle" => {
+            count(&values, 1, 1, span)?;
+            let default = boolean(&values[0])?;
+            Ok(Parameter::Toggle {
+                title,
+                field_name: name,
+                default,
+                value: default,
+            })
+        }
+        "int" => {
+            count(&values, 1, 3, span)?;
+            let default = int(&values[0])?;
+            let (bmin, bmax) = bounds(ty);
+            let min = values.get(1).map(int).transpose()?.or(bmin);
+            let max = values.get(2).map(int).transpose()?.or(bmax);
+            if min.is_some_and(|m| default < m)
+                || max.is_some_and(|m| default > m)
+                || matches!((min,max),(Some(a),Some(b)) if a>b)
+            {
+                return Err(syn::Error::new(
+                    span,
+                    "integer range requires min <= default <= max",
+                ));
+            }
+            Ok(Parameter::Int {
+                title,
+                field_name: name,
+                default,
+                value: default,
+                min,
+                max,
+            })
+        }
+        "list" | "vec" => {
+            count(&values, 2, 5, span)?;
+            let size = match &values[0] {
+                Expr::Path(p) if p.path.get_ident().is_some() => ListSize::Field(
+                    p.path
+                        .get_ident()
+                        .map(ToString::to_string)
+                        .unwrap_or_default(),
+                ),
+                Expr::Lit(syn::ExprLit {
+                    lit: syn::Lit::Int(n),
+                    ..
+                }) => ListSize::Constant(n.base10_parse()?),
+                other => {
+                    return Err(syn::Error::new(
+                        other.span(),
+                        "list size must be a field name or nonnegative integer literal",
+                    ));
+                }
+            };
+            let element = if let Expr::Path(p) = &values[1] {
+                p.path.get_ident().map(ToString::to_string)
+            } else {
+                None
+            }
+            .ok_or_else(|| {
+                syn::Error::new(
+                    values[1].span(),
+                    "expected list element type float, range, toggle, or int",
+                )
+            })?;
+            let args = &values[2..];
+            let ltype = match element.as_str() {
+                "float" => {
+                    count(args, 0, 1, span)?;
+                    Literal::Float(
+                        title.clone(),
+                        args.first().map(number).transpose()?.unwrap_or(0.0),
+                    )
+                }
+                "toggle" => {
+                    count(args, 0, 1, span)?;
+                    Literal::Toggle(
+                        title.clone(),
+                        args.first().map(boolean).transpose()?.unwrap_or(false),
+                    )
+                }
+                "range" => {
+                    count(args, 0, 3, span)?;
+                    let min = args.first().map(number).transpose()?.unwrap_or(0.0);
+                    let max = args.get(1).map(number).transpose()?.unwrap_or(1.0);
+                    let default = args.get(2).map(number).transpose()?.unwrap_or(0.0);
+                    if min > max || default < min || default > max {
+                        return Err(syn::Error::new(
+                            span,
+                            "list range requires min <= default <= max",
+                        ));
+                    }
+                    Literal::Range(title.clone(), min, max, default)
+                }
+                "int" => {
+                    count(args, 0, 3, span)?;
+                    let default = args.first().map(int).transpose()?.unwrap_or(0);
+                    let min = args.get(1).map(int).transpose()?;
+                    let max = args.get(2).map(int).transpose()?;
+                    if min.is_some_and(|m| default < m)
+                        || max.is_some_and(|m| default > m)
+                        || matches!((min,max),(Some(a),Some(b)) if a>b)
+                    {
+                        return Err(syn::Error::new(
+                            span,
+                            "list integer range requires min <= default <= max",
+                        ));
+                    }
+                    Literal::Int(title.clone(), default, min, max)
+                }
+                _ => {
+                    return Err(syn::Error::new(
+                        values[1].span(),
+                        format!("unknown list element type `{element}`"),
+                    ));
+                }
+            };
+            Ok(Parameter::List {
+                title,
+                field_name: name,
+                size,
+                ltype,
+            })
+        }
+        _ => Err(syn::Error::new(
+            span,
+            format!("unknown legacy parameter type `{kind}`"),
+        )),
+    }
+}
 
-    let parameter_title: String = name.to_case(Case::Title);
-
-    match param_type.as_str() {
-        "range" => extract_range_parameter(name, parameter_title, values),
-        "toggle" => extract_toggle_parameter(name, parameter_title, values),
-        "float" => extract_float_parameter(name, parameter_title, values),
-        "int" => extract_int_parameter(name, parameter_title, values),
-        "val" => extract_val_parameter(name, parameter_title, field_type, values),
-        "list" | "vec" => extract_vector_parameter(name, parameter_title, values),
-        any => panic!("Unknown parameter type: {any}"),
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn legacy_signed_literals_suffixes_and_lists_are_parsed_without_token_loss() {
+        let ty = syn::parse_quote!(i32);
+        let value =
+            extract_parameter("gain".into(), &ty, quote::quote!(range, -1.0f32, 1.0, 0.0)).unwrap();
+        assert!(matches!(value, Parameter::Range { min: -1.0, .. }));
+        let value = extract_parameter("offset".into(), &ty, quote::quote!(int, -2, -4, 4)).unwrap();
+        assert!(matches!(value, Parameter::Int { default: -2, .. }));
+        let value =
+            extract_parameter("shape".into(), &ty, quote::quote!(list, 4, int, -1, -2, 2)).unwrap();
+        assert!(matches!(
+            value,
+            Parameter::List {
+                ltype: Literal::Int(_, -1, Some(-2), Some(2)),
+                ..
+            }
+        ));
+    }
+    #[test]
+    fn legacy_malformed_values_return_errors() {
+        for input in [
+            quote::quote!(range),
+            quote::quote!(toggle, 1),
+            quote::quote!(float),
+            quote::quote!(int, 999999999999),
+            quote::quote!(list, 4, unknown),
+        ] {
+            assert!(extract_parameter("x".into(), &syn::parse_quote!(f32), input).is_err());
+        }
     }
 }
