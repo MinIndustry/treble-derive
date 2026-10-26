@@ -1,0 +1,11 @@
+error: context fields cannot also declare parameters, ports, or modulation
+ --> tests/ui/fail/placement.rs:5:5
+  |
+5 |     #[treble(context(sample_rate),param(id="sample_rate",default=48000.0))] rate:f32,
+  |     ^
+
+error: modulation requires a parameter on the same field
+ --> tests/ui/fail/placement.rs:6:14
+  |
+6 |     #[treble(modulation(port="cv"))] value:f32,
+  |              ^^^^^^^^^^

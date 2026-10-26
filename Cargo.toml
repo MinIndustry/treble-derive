@@ -3,7 +3,7 @@ name = "treble-derive"
 description = "Macros for generating filter metadata"
 repository = "https://github.com/MinIndustry/treble-derive"
 license = "MIT"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 
 [lib]
@@ -13,5 +13,9 @@ proc-macro = true
 convert_case = "0.8.0"
 proc-macro2 = "1.0.94"
 quote = "1.0.39"
-syn = "2.0.99"
-treble-meta = "0.2.0"
+syn = { version = "2.0.99", features = ["full"] }
+treble-meta = "0.3.0"
+proc-macro-crate = "3"
+
+[dev-dependencies]
+trybuild = "1.0"

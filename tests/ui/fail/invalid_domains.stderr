@@ -1,0 +1,17 @@
+error: value 24000 is outside [-1, 20000]
+ --> tests/ui/fail/invalid_domains.rs:5:43
+  |
+5 |     #[treble(param(id="frequency",default=24000.0,range(min=-1.0,max=20000.0),scale=logarithmic))] x:f32,
+  |                                           ^^^^^^^
+
+error: logarithmic bounds must be positive
+ --> tests/ui/fail/invalid_domains.rs:5:61
+  |
+5 |     #[treble(param(id="frequency",default=24000.0,range(min=-1.0,max=20000.0),scale=logarithmic))] x:f32,
+  |                                                             ^
+
+error: value 2 is outside [0, 1]
+ --> tests/ui/fail/invalid_domains.rs:6:39
+  |
+6 |     #[treble(param(id="other",default=2.0,range(min=0.0,max=1.0)))] y:f32,
+  |                                       ^^^

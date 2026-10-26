@@ -1,0 +1,23 @@
+error: duplicate ID `x`
+ --> tests/ui/fail/duplicate_ids.rs:6:76
+  |
+6 | struct Bad { #[treble(param(id="x",default=0.0))] a:f32, #[treble(param(id="x",default=0.0))] b:f32 }
+  |                                                                            ^^^
+
+error: audio requires at least one channel
+ --> tests/ui/fail/duplicate_ids.rs:4:56
+  |
+4 | #[treble(output(id="out",index=0,signal=audio(channels=0)))]
+  |                                                        ^
+
+error: duplicate ID `out`
+ --> tests/ui/fail/duplicate_ids.rs:5:20
+  |
+5 | #[treble(output(id="out",index=0,signal=gate))]
+  |                    ^^^^^
+
+error: duplicate implementation index within direction
+ --> tests/ui/fail/duplicate_ids.rs:5:32
+  |
+5 | #[treble(output(id="out",index=0,signal=gate))]
+  |                                ^

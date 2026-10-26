@@ -1,0 +1,5 @@
+error: unexpected end of input, expected an expression
+ --> tests/ui/fail/malformed.rs:5:49
+  |
+5 |     #[treble(param(id="x",default=1.0,range(min=))) ] x:f32,
+  |                                                 ^

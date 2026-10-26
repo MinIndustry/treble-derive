@@ -14,6 +14,7 @@ fn filter_description(input: &DeriveInput) -> String {
     input
         .attrs
         .iter()
+        .filter(|attr| attr.path().is_ident("doc"))
         .filter_map(|attr| {
             if let syn::Meta::NameValue(value) = &attr.meta {
                 if let syn::Expr::Lit(value) = &value.value {
@@ -60,13 +61,13 @@ fn filter_input_ports(input: &DeriveInput) -> usize {
         }
         if total == 0 { 1 } else { total }
     } else {
-        panic!("FilterMetaData can only be derived for structs");
+        0 // The derive entry point rejects non-structs before reaching this helper.
     }
 }
 
 /// Extracts the parameters from the filter structure,
 /// returning each parameter alongside its field type for code generation.
-fn filter_parameters(input: &DeriveInput) -> Vec<(Parameter<String>, syn::Type)> {
+fn filter_parameters(input: &DeriveInput) -> syn::Result<Vec<(Parameter<String>, syn::Type)>> {
     let mut parameters = vec![];
     if let syn::Data::Struct(filter_structure) = &input.data {
         for field in filter_structure.fields.iter() {
@@ -78,17 +79,19 @@ fn filter_parameters(input: &DeriveInput) -> Vec<(Parameter<String>, syn::Type)>
             {
                 let field_name = field
                     .ident
-                    .clone()
-                    .expect("Field name is required")
+                    .as_ref()
+                    .ok_or_else(|| {
+                        syn::Error::new_spanned(field, "legacy parameters require named fields")
+                    })?
                     .to_string();
                 let field_type = field.ty.clone();
-                let param = extract_parameter(field_name, &field_type, token_list.tokens.clone());
+                let param = extract_parameter(field_name, &field_type, token_list.tokens.clone())?;
                 parameters.push((param, field_type));
             }
         }
     }
 
-    parameters
+    Ok(parameters)
 }
 
 /// Returns the field_name string from any Parameter variant.
@@ -253,12 +256,23 @@ fn generate_meta_filter_impl(
 /// data for the frontend to render the filter.
 #[proc_macro_derive(FilterMetaData, attributes(filter_source, filter_parameter))]
 pub fn derive_metadata(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    let input = parse_macro_input!(item as DeriveInput);
+    legacy_metadata(parse_macro_input!(item as DeriveInput))
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
 
+fn legacy_metadata(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
+    if !matches!(&input.data, syn::Data::Struct(data) if !matches!(data.fields, syn::Fields::Unnamed(_)))
+    {
+        return Err(syn::Error::new_spanned(
+            &input.ident,
+            "FilterMetaData requires a struct with named fields or a unit struct",
+        ));
+    }
     let name = input.ident.clone().to_string();
     let description = filter_description(&input);
     let source_amount = filter_input_ports(&input);
-    let parameter_infos = filter_parameters(&input);
+    let parameter_infos = filter_parameters(&input)?;
 
     let struct_name = &input.ident;
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
@@ -293,5 +307,31 @@ pub fn derive_metadata(item: proc_macro::TokenStream) -> proc_macro::TokenStream
         #meta_filter_impl
     };
 
-    proc_macro::TokenStream::from(tokens)
+    Ok(tokens)
+}
+
+mod module;
+
+/// Describe a versioned module without registering it with an audio runtime.
+#[proc_macro_derive(ModuleMetadata, attributes(treble))]
+pub fn derive_module_metadata(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    module::metadata(parse_macro_input!(item as DeriveInput))
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+/// Generate inherent typed parameter accessors. Requires ModuleMetadata as well.
+#[proc_macro_derive(ModuleParameters, attributes(treble))]
+pub fn derive_module_parameters(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    module::parameters(parse_macro_input!(item as DeriveInput))
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+/// Give unit enum variants stable serialized identities.
+#[proc_macro_derive(ParameterEnum, attributes(treble))]
+pub fn derive_parameter_enum(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    module::enumeration(parse_macro_input!(item as DeriveInput))
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
 }

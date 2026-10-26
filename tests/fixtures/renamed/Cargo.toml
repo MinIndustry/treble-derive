@@ -1,0 +1,11 @@
+[package]
+name = "renamed-dependency-fixture"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+metadata = { package = "treble-meta", version = "0.3.0" }
+treble-derive = { path = "../../.." }
+
+[workspace]
