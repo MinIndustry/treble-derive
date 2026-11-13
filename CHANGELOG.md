@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.0
+
+- Depend on treble-meta 0.4.0.
+- Legacy `#[filter_parameter(...)]` accepts optional trailing named flags after
+  the positional arguments: `access = user | engine` and
+  `scale = linear | logarithmic`. Existing declarations compile unchanged.
+- Generated `FilterInput`s carry the declared `access` (default `user`) and
+  `scale` (default `None`). Engine-owned parameters remain in
+  `supports_parameter`/`set_parameter` so hosts can still inject them.
+- Reject at compile time, with spans: logarithmic scale without a declared
+  `min > 0` (including bare `float`), `scale` on non-numeric parameters, flags on
+  list parameters, unknown or duplicate flags, unknown values, and positional
+  arguments after a flag.
+
 ## 0.3.0
 
 - Depend on published treble-meta 0.3.0, with no local metadata/core patches.

@@ -4,7 +4,7 @@ use syn::{DeriveInput, parse_macro_input};
 mod helpers;
 mod parameters;
 
-use parameters::extract_parameter;
+use parameters::{LegacyFlags, extract_parameter};
 use treble_meta::Parameter;
 
 /// Extracts the description from the filter's
@@ -67,7 +67,9 @@ fn filter_input_ports(input: &DeriveInput) -> usize {
 
 /// Extracts the parameters from the filter structure,
 /// returning each parameter alongside its field type for code generation.
-fn filter_parameters(input: &DeriveInput) -> syn::Result<Vec<(Parameter<String>, syn::Type)>> {
+type LegacyParameters = Vec<(Parameter<String>, syn::Type, LegacyFlags)>;
+
+fn filter_parameters(input: &DeriveInput) -> syn::Result<LegacyParameters> {
     let mut parameters = vec![];
     if let syn::Data::Struct(filter_structure) = &input.data {
         for field in filter_structure.fields.iter() {
@@ -85,8 +87,9 @@ fn filter_parameters(input: &DeriveInput) -> syn::Result<Vec<(Parameter<String>,
                     })?
                     .to_string();
                 let field_type = field.ty.clone();
-                let param = extract_parameter(field_name, &field_type, token_list.tokens.clone())?;
-                parameters.push((param, field_type));
+                let (param, flags) =
+                    extract_parameter(field_name, &field_type, token_list.tokens.clone())?;
+                parameters.push((param, field_type, flags));
             }
         }
     }
@@ -105,8 +108,25 @@ fn get_param_field_name(param: &Parameter<String>) -> &str {
     }
 }
 
+fn access_tokens(flags: &LegacyFlags) -> proc_macro2::TokenStream {
+    match flags.access {
+        treble_meta::ParameterAccess::User => quote! { treble_meta::ParameterAccess::User },
+        treble_meta::ParameterAccess::Engine => quote! { treble_meta::ParameterAccess::Engine },
+    }
+}
+
+fn scale_tokens(flags: &LegacyFlags) -> proc_macro2::TokenStream {
+    match flags.scale {
+        None => quote! { None },
+        Some(treble_meta::Scale::Linear) => quote! { Some(treble_meta::Scale::Linear) },
+        Some(treble_meta::Scale::Logarithmic) => {
+            quote! { Some(treble_meta::Scale::Logarithmic) }
+        }
+    }
+}
+
 fn build_filter_info(
-    parameters: &[(Parameter<String>, syn::Type)],
+    parameters: &[(Parameter<String>, syn::Type, LegacyFlags)],
     name: &str,
     description: &str,
     source_amount: usize,
@@ -114,7 +134,14 @@ fn build_filter_info(
     // One audio FilterInput per audio source port
     let audio_inputs: Vec<proc_macro2::TokenStream> = (0..source_amount)
         .map(|_| {
-            quote! { treble_meta::FilterInput { label: None, parameter: None } }
+            quote! {
+                treble_meta::FilterInput {
+                    label: None,
+                    parameter: None,
+                    access: treble_meta::ParameterAccess::User,
+                    scale: None,
+                }
+            }
         })
         .collect();
 
@@ -124,15 +151,19 @@ fn build_filter_info(
     // One parameter FilterInput per filter_parameter field (skip List params)
     let param_inputs: Vec<proc_macro2::TokenStream> = parameters
         .iter()
-        .filter_map(|(param, _)| {
+        .filter_map(|(param, _, flags)| {
             if matches!(param, Parameter::List { .. }) {
                 return None;
             }
             let label = get_param_field_name(param);
+            let access = access_tokens(flags);
+            let scale = scale_tokens(flags);
             Some(quote! {
                 treble_meta::FilterInput {
                     label: Some(#label),
                     parameter: Some(#param),
+                    access: #access,
+                    scale: #scale,
                 }
             })
         })
@@ -162,7 +193,7 @@ fn build_filter_info(
 /// - List: skipped (can't set with a single f32)
 fn generate_meta_filter_impl(
     struct_name: &syn::Ident,
-    parameters: &[(Parameter<String>, syn::Type)],
+    parameters: &[(Parameter<String>, syn::Type, LegacyFlags)],
     filter_info: proc_macro2::TokenStream,
     impl_generics: &syn::ImplGenerics,
     ty_generics: &syn::TypeGenerics,
@@ -170,7 +201,7 @@ fn generate_meta_filter_impl(
 ) -> proc_macro2::TokenStream {
     let arms: Vec<proc_macro2::TokenStream> = parameters
         .iter()
-        .filter_map(|(param, field_type)| match param {
+        .filter_map(|(param, field_type, _)| match param {
             Parameter::Range {
                 field_name,
                 min,
@@ -217,7 +248,7 @@ fn generate_meta_filter_impl(
         .collect();
     let supported_names: Vec<&String> = parameters
         .iter()
-        .filter_map(|(parameter, _)| match parameter {
+        .filter_map(|(parameter, _, _)| match parameter {
             Parameter::Range { field_name, .. }
             | Parameter::Float { field_name, .. }
             | Parameter::Toggle { field_name, .. }
@@ -334,4 +365,54 @@ pub fn derive_parameter_enum(item: proc_macro::TokenStream) -> proc_macro::Token
     module::enumeration(parse_macro_input!(item as DeriveInput))
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_inputs_carry_access_and_scale() {
+        let input: DeriveInput = syn::parse_quote! {
+            struct Tremolo {
+                #[filter_source]
+                source: (),
+                #[filter_parameter(range, 0.01, 20.0, 1.0, scale = logarithmic)]
+                frequency: f32,
+                #[filter_parameter(range, 1.0, 192000.0, 44100.0, access = engine)]
+                sample_rate: f32,
+            }
+        };
+        let parameters = filter_parameters(&input).unwrap();
+        let info = build_filter_info(&parameters, "Tremolo", "", 1)
+            .to_string()
+            .replace(' ', "");
+        assert_eq!(
+            info.matches("access:treble_meta::ParameterAccess::User")
+                .count(),
+            2
+        );
+        assert_eq!(
+            info.matches("access:treble_meta::ParameterAccess::Engine")
+                .count(),
+            1
+        );
+        assert_eq!(
+            info.matches("scale:Some(treble_meta::Scale::Logarithmic)")
+                .count(),
+            1
+        );
+        assert_eq!(info.matches("scale:None").count(), 2);
+        // Engine-owned parameters stay settable so hosts can inject them.
+        let meta = generate_meta_filter_impl(
+            &input.ident,
+            &parameters,
+            quote! {},
+            &input.generics.split_for_impl().0,
+            &input.generics.split_for_impl().1,
+            None,
+        )
+        .to_string();
+        assert!(meta.contains("\"sample_rate\""));
+    }
 }

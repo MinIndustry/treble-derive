@@ -209,7 +209,7 @@ checksum = "06bdbd8cfc056b8d2e2e85f29b56a3bdbecb527cef81eb39e3e7b98af4652770"
 
 [[package]]
 name = "treble-derive"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "convert_case",
  "proc-macro-crate",
@@ -222,9 +222,9 @@ dependencies = [
 
 [[package]]
 name = "treble-meta"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a32eb635139487e9268e8ee3756ee569c6a72fb7dc0b66b13906d2d3e070e2c7"
+checksum = "e3624d63709a7d16fde0bccee0250f035364a06ff66c91db6c98129afa720521"
 dependencies = [
  "proc-macro2",
  "quote",
