@@ -1,0 +1,23 @@
+error: logarithmic scale requires a declared min > 0
+ --> tests/ui/fail/legacy_flags.rs:3:72
+  |
+3 | struct LogFromZero { #[filter_parameter(range, 0.0, 20.0, 1.0, scale = logarithmic)] x: f32 }
+  |                                                                        ^^^^^^^^^^^
+
+error: expected access `user` or `engine`
+ --> tests/ui/fail/legacy_flags.rs:5:83
+  |
+5 | struct UnknownAccess { #[filter_parameter(range, 1.0, 192000.0, 44100.0, access = host)] x: f32 }
+  |                                                                                   ^^^^
+
+error: duplicate flag `scale`
+ --> tests/ui/fail/legacy_flags.rs:7:71
+  |
+7 | struct DuplicateFlag { #[filter_parameter(float, 1.0, scale = linear, scale = linear)] x: f32 }
+  |                                                                       ^^^^^
+
+error: positional arguments must precede named flags
+ --> tests/ui/fail/legacy_flags.rs:9:79
+  |
+9 | struct FlagBeforePositional { #[filter_parameter(range, 0.0, access = engine, 1.0, 0.5)] x: f32 }
+  |                                                                               ^^^

@@ -5,7 +5,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
-metadata = { package = "treble-meta", version = "0.3.0" }
+metadata = { package = "treble-meta", version = "0.4.0" }
 treble-derive = { path = "../../.." }
 
 [workspace]

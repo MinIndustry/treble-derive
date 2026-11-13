@@ -1,6 +1,6 @@
 # Treble Derive
 
-Derives for `treble-meta` 0.3.0 module contracts. The new derives describe modules
+Derives for `treble-meta` 0.4.0 module contracts. The new derives describe modules
 and edit typed configuration; they do not register factories or process audio.
 
 ## A playable source declaration
@@ -201,6 +201,21 @@ their behavior; previously ignored extra arguments now produce errors. Renamed
 crate resolution and generic support belong to the new derives; legacy automatic
 registration still assumes treble-core's module layout and dependencies.
 
-Release order: published `treble-meta` **0.3.0** → publish this crate **0.3.0** →
+Since 0.4.0 a legacy parameter may end with named flags, after all positional
+arguments:
+
+```rust,ignore
+#[filter_parameter(range, 0.01, 20.0, 1.0, scale = logarithmic)]
+frequency: f32,
+#[filter_parameter(range, 1.0, 192000.0, 44100.0, access = engine)]
+sample_rate: f32,
+```
+
+`access` (`user` | `engine`, default `user`) and `scale` (`linear` |
+`logarithmic`, default unset) are emitted on the generated `FilterInput`.
+Engine-owned parameters stay settable through `set_parameter`, so hosts keep
+injecting them. A logarithmic scale requires a declared `min > 0`.
+
+Release order: publish `treble-meta` **0.4.0** → publish this crate **0.4.0** →
 update `treble-core` separately. The new derives never emit inventory registration,
 core graph types or DSP code. Publish/merge decisions remain with the maintainer.

@@ -7,27 +7,136 @@ use syn::{
     punctuated::Punctuated,
     spanned::Spanned,
 };
-use treble_meta::{ListSize, Literal, Parameter};
+use treble_meta::{ListSize, Literal, Parameter, ParameterAccess, Scale};
 
 struct Arguments {
     kind: Ident,
     values: Vec<Expr>,
+    flags: Vec<(Ident, Ident)>,
 }
 impl Parse for Arguments {
     fn parse(input: ParseStream<'_>) -> Result<Self> {
         let kind = input.parse()?;
+        let mut values = vec![];
+        let mut flags: Vec<(Ident, Ident)> = vec![];
         if input.is_empty() {
             return Ok(Self {
                 kind,
-                values: vec![],
+                values,
+                flags,
             });
         }
         input.parse::<Token![,]>()?;
-        let values = Punctuated::<Expr, Token![,]>::parse_terminated(input)?
-            .into_iter()
-            .collect();
-        Ok(Self { kind, values })
+        for expr in Punctuated::<Expr, Token![,]>::parse_terminated(input)? {
+            match expr {
+                Expr::Assign(assign) => flags.push(flag(&assign)?),
+                other if !flags.is_empty() => {
+                    return Err(syn::Error::new(
+                        other.span(),
+                        "positional arguments must precede named flags",
+                    ));
+                }
+                other => values.push(other),
+            }
+        }
+        Ok(Self {
+            kind,
+            values,
+            flags,
+        })
     }
+}
+
+fn ident_of(e: &Expr) -> Option<Ident> {
+    match e {
+        Expr::Path(p) => p.path.get_ident().cloned(),
+        _ => None,
+    }
+}
+fn flag(assign: &syn::ExprAssign) -> Result<(Ident, Ident)> {
+    let key = ident_of(&assign.left)
+        .ok_or_else(|| syn::Error::new(assign.left.span(), "expected a flag name"))?;
+    let value = ident_of(&assign.right)
+        .ok_or_else(|| syn::Error::new(assign.right.span(), "expected an identifier value"))?;
+    Ok((key, value))
+}
+
+/// Optional named flags of a legacy parameter, emitted on its `FilterInput`.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LegacyFlags {
+    pub access: ParameterAccess,
+    pub scale: Option<Scale>,
+}
+
+fn parse_flags(parameter: &Parameter<String>, flags: &[(Ident, Ident)]) -> Result<LegacyFlags> {
+    let mut out = LegacyFlags::default();
+    let (mut seen_access, mut seen_scale) = (false, false);
+    for (key, value) in flags {
+        if matches!(parameter, Parameter::List { .. }) {
+            return Err(syn::Error::new(
+                key.span(),
+                "named flags are not supported on list parameters",
+            ));
+        }
+        let seen = match key.to_string().as_str() {
+            "access" => &mut seen_access,
+            "scale" => &mut seen_scale,
+            other => {
+                return Err(syn::Error::new(
+                    key.span(),
+                    format!("unknown flag `{other}`; expected `access` or `scale`"),
+                ));
+            }
+        };
+        if std::mem::replace(seen, true) {
+            return Err(syn::Error::new(
+                key.span(),
+                format!("duplicate flag `{key}`"),
+            ));
+        }
+        if key == "access" {
+            out.access = match value.to_string().as_str() {
+                "user" => ParameterAccess::User,
+                "engine" => ParameterAccess::Engine,
+                _ => {
+                    return Err(syn::Error::new(
+                        value.span(),
+                        "expected access `user` or `engine`",
+                    ));
+                }
+            };
+            continue;
+        }
+        let scale = match value.to_string().as_str() {
+            "linear" => Scale::Linear,
+            "logarithmic" => Scale::Logarithmic,
+            _ => {
+                return Err(syn::Error::new(
+                    value.span(),
+                    "expected scale `linear` or `logarithmic`",
+                ));
+            }
+        };
+        let min = match parameter {
+            Parameter::Range { min, .. } => Some(*min),
+            Parameter::Int { min, .. } => min.map(|m| m as f32),
+            Parameter::Float { .. } => None,
+            _ => {
+                return Err(syn::Error::new(
+                    key.span(),
+                    "scale applies only to numeric parameters",
+                ));
+            }
+        };
+        if scale == Scale::Logarithmic && !min.is_some_and(|m| m > 0.0) {
+            return Err(syn::Error::new(
+                value.span(),
+                "logarithmic scale requires a declared min > 0",
+            ));
+        }
+        out.scale = Some(scale);
+    }
+    Ok(out)
 }
 fn number(e: &Expr) -> Result<f32> {
     let n = crate::module::attrs::number(e)?;
@@ -115,8 +224,23 @@ pub fn extract_parameter(
     name: String,
     ty: &syn::Type,
     tokens: TokenStream,
+) -> Result<(Parameter<String>, LegacyFlags)> {
+    let Arguments {
+        kind,
+        values,
+        flags,
+    } = syn::parse2(tokens)?;
+    let parameter = positional_parameter(name, ty, kind, values)?;
+    let flags = parse_flags(&parameter, &flags)?;
+    Ok((parameter, flags))
+}
+
+fn positional_parameter(
+    name: String,
+    ty: &syn::Type,
+    kind: Ident,
+    values: Vec<Expr>,
 ) -> Result<Parameter<String>> {
-    let Arguments { kind, values } = syn::parse2(tokens)?;
     let span = kind.span();
     let title = name.to_case(Case::Title);
     let kind = if kind == "val" {
@@ -298,13 +422,17 @@ mod tests {
     #[test]
     fn legacy_signed_literals_suffixes_and_lists_are_parsed_without_token_loss() {
         let ty = syn::parse_quote!(i32);
-        let value =
-            extract_parameter("gain".into(), &ty, quote::quote!(range, -1.0f32, 1.0, 0.0)).unwrap();
+        let value = extract_parameter("gain".into(), &ty, quote::quote!(range, -1.0f32, 1.0, 0.0))
+            .unwrap()
+            .0;
         assert!(matches!(value, Parameter::Range { min: -1.0, .. }));
-        let value = extract_parameter("offset".into(), &ty, quote::quote!(int, -2, -4, 4)).unwrap();
+        let value = extract_parameter("offset".into(), &ty, quote::quote!(int, -2, -4, 4))
+            .unwrap()
+            .0;
         assert!(matches!(value, Parameter::Int { default: -2, .. }));
-        let value =
-            extract_parameter("shape".into(), &ty, quote::quote!(list, 4, int, -1, -2, 2)).unwrap();
+        let value = extract_parameter("shape".into(), &ty, quote::quote!(list, 4, int, -1, -2, 2))
+            .unwrap()
+            .0;
         assert!(matches!(
             value,
             Parameter::List {
@@ -323,6 +451,57 @@ mod tests {
             quote::quote!(list, 4, unknown),
         ] {
             assert!(extract_parameter("x".into(), &syn::parse_quote!(f32), input).is_err());
+        }
+    }
+
+    fn flags_of(tokens: TokenStream) -> Result<LegacyFlags> {
+        extract_parameter("x".into(), &syn::parse_quote!(f32), tokens).map(|(_, f)| f)
+    }
+    #[test]
+    fn legacy_flags_default_to_user_without_scale() {
+        assert_eq!(
+            flags_of(quote::quote!(range, 0.0, 1.0, 0.5)).unwrap(),
+            LegacyFlags::default()
+        );
+    }
+    #[test]
+    fn legacy_flags_parse_in_any_order() {
+        let flags = flags_of(quote::quote!(
+            range,
+            20.0,
+            20000.0,
+            1000.0,
+            scale = logarithmic,
+            access = engine
+        ))
+        .unwrap();
+        assert_eq!(flags.access, ParameterAccess::Engine);
+        assert_eq!(flags.scale, Some(Scale::Logarithmic));
+        let flags = flags_of(quote::quote!(float, 1.0, access = engine, scale = linear)).unwrap();
+        assert_eq!(flags.scale, Some(Scale::Linear));
+        let ty = syn::parse_quote!(usize);
+        let (_, flags) = extract_parameter(
+            "size".into(),
+            &ty,
+            quote::quote!(val, 3, 1, 64, scale = logarithmic),
+        )
+        .unwrap();
+        assert_eq!(flags.scale, Some(Scale::Logarithmic));
+    }
+    #[test]
+    fn legacy_flags_reject_invalid_declarations() {
+        for input in [
+            quote::quote!(range, 0.0, 20.0, 1.0, scale = logarithmic),
+            quote::quote!(float, 1.0, scale = logarithmic),
+            quote::quote!(toggle, true, scale = linear),
+            quote::quote!(list, 4, float, access = engine),
+            quote::quote!(range, 0.0, 1.0, 0.5, scale = log),
+            quote::quote!(range, 0.0, 1.0, 0.5, access = host),
+            quote::quote!(range, 0.0, 1.0, 0.5, unit = hz),
+            quote::quote!(range, 0.0, 1.0, 0.5, access = user, access = engine),
+            quote::quote!(range, 0.0, access = engine, 1.0, 0.5),
+        ] {
+            assert!(flags_of(input.clone()).is_err(), "accepted {input}");
         }
     }
 }

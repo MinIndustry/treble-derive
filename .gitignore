@@ -1,2 +1,5 @@
 target/
 .DS_Store
+
+# Local-only cargo overrides (e.g. [patch.crates-io] to sibling checkouts)
+/.cargo/config.toml
